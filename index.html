@@ -283,6 +283,37 @@ html,body{height:100%;overflow:hidden;font-family:'Noto Sans JP',sans-serif;back
   #toast{bottom:70px}
   #nav-recenter{bottom:130px}
 }
+
+/* ── DATE/TIME PICKER ── */
+#dt-picker{background:var(--g50);border-radius:var(--r);padding:10px 12px;margin:8px 0 10px;border:1px solid var(--g200)}
+.dt-row{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+.dt-row:last-child{margin-bottom:0}
+.dt-label{font-size:12px;color:var(--g700);font-weight:500;white-space:nowrap;min-width:54px}
+.dt-seg{display:flex;gap:4px;flex:1}
+.dt-sel{flex:1;border:1px solid var(--g300);border-radius:6px;padding:6px 8px;font-size:13px;font-family:inherit;color:var(--g900);background:var(--w);cursor:pointer;outline:none;transition:border-color .15s;min-width:0}
+.dt-sel:focus{border-color:var(--bl)}
+.dt-now-btn{background:none;border:1px solid var(--g300);border-radius:6px;padding:5px 10px;font-size:12px;font-family:inherit;cursor:pointer;color:var(--g700);white-space:nowrap;transition:all .15s}
+.dt-now-btn:hover{border-color:var(--bl);color:var(--bl)}
+.arrive-by-row{display:flex;gap:4px;margin-bottom:8px}
+.ab-btn{flex:1;padding:7px 4px;border:1px solid var(--g300);border-radius:6px;font-size:12px;font-weight:500;font-family:inherit;cursor:pointer;background:var(--w);color:var(--g700);transition:all .15s;text-align:center}
+.ab-btn.on{background:var(--bll);border-color:var(--bl);color:var(--bl)}
+
+/* ── DELAY BADGE ── */
+.delay-badge{display:inline-flex;align-items:center;gap:3px;padding:2px 7px;border-radius:100px;font-size:11px;font-weight:700}
+.delay-late{background:#FEEBEE;color:var(--rd)}
+.delay-ok{background:#E8F5E9;color:var(--gn)}
+.delay-warn{background:#FFF8E1;color:#E65100}
+.realtime-dot{width:6px;height:6px;border-radius:50%;background:var(--gn);animation:rtblink 1.4s infinite;display:inline-block;margin-right:2px}
+@keyframes rtblink{0%,100%{opacity:1}50%{opacity:.3}}
+.delay-line{text-decoration:line-through;opacity:.55;margin-right:3px}
+
+/* ── DISRUPTION BANNER ── */
+.disrupt-banner{display:flex;align-items:flex-start;gap:8px;padding:8px 12px;background:#FFF8E1;border-left:3px solid var(--yw);border-radius:0 var(--r) var(--r) 0;margin:6px 0;font-size:12px;color:var(--g700);line-height:1.5}
+.disrupt-banner.severe{background:#FEEBEE;border-color:var(--rd);color:#B71C1C}
+.disrupt-banner i{flex-shrink:0;margin-top:1px}
+
+/* ── REALTIME HEADER ── */
+.rt-realtime-row{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--g500);margin-bottom:8px}
 </style>
 </head>
 <body>
@@ -394,6 +425,30 @@ html,body{height:100%;overflow:hidden;font-family:'Noto Sans JP',sans-serif;back
         <button class="tm"     id="tm-bike"    onclick="setTM('bike')"><i class="fa fa-bicycle"></i>自転車</button>
         <button class="tm"     id="tm-walk"    onclick="setTM('walk')"><i class="fa fa-person-walking"></i>徒歩</button>
       </div>
+
+      <!-- 出発/到着時刻指定 -->
+      <div id="dt-picker">
+        <div class="arrive-by-row">
+          <button class="ab-btn on" id="ab-depart" onclick="setArriveBy(false)">🚀 出発時刻</button>
+          <button class="ab-btn"    id="ab-arrive" onclick="setArriveBy(true)">🏁 到着時刻</button>
+        </div>
+        <div class="dt-row">
+          <span class="dt-label">📅 日付</span>
+          <div class="dt-seg">
+            <select class="dt-sel" id="dt-date" onchange="onDtChange()"></select>
+            <button class="dt-now-btn" onclick="resetDtNow()">今すぐ</button>
+          </div>
+        </div>
+        <div class="dt-row">
+          <span class="dt-label">🕐 時刻</span>
+          <div class="dt-seg">
+            <select class="dt-sel" id="dt-hour" onchange="onDtChange()" style="flex:0 0 72px"></select>
+            <span style="line-height:34px;color:var(--g500);font-weight:700">:</span>
+            <select class="dt-sel" id="dt-min"  onchange="onDtChange()" style="flex:0 0 72px"></select>
+          </div>
+        </div>
+      </div>
+
       <button class="go-btn" id="go-btn" onclick="calcRoute()">
         <i class="fa fa-magnifying-glass"></i>ルートを検索
       </button>
@@ -803,22 +858,21 @@ async function calcTransit(fLL,tLL){
 // ── 1. Transitous (MOTIS2 v5) ───────────────
 // Spec: time=ISO8601 date-time, endpoint=/api/v5/plan, response=body.itineraries
 async function tryTransitous(fLL,tLL){
-  // ✅ Correct: ISO 8601 date-time string (type:string, format:date-time)
-  const time = new Date().toISOString(); // e.g. "2026-03-31T13:15:00.000Z"
+  // ✅ ISO 8601 from the date/time picker (or "now" if not set)
+  const time = getPickerISO();
 
   const params = new URLSearchParams({
     fromPlace:          `${fLL.lat},${fLL.lng}`,
     toPlace:            `${tLL.lat},${tLL.lng}`,
-    time,                            // ISO 8601
+    time,                            // ISO 8601 from picker
+    arriveBy:           pickerArriveBy ? 'true' : 'false',
     numItineraries:     '5',
-    searchWindow:       '3600',      // 1-hour window → more options
-    maxPreTransitTime:  '1200',      // 20-min max walk to first stop
-    maxPostTransitTime: '1200',      // 20-min max walk from last stop
-    pedestrianSpeed:    '1.4',       // m/s (replaces deprecated walkSpeed)
+    searchWindow:       '5400',      // 90-min window
+    maxPreTransitTime:  '1500',      // 25-min walk to stop
+    maxPostTransitTime: '1500',
+    pedestrianSpeed:    '1.4',
     language:           'ja',
-    // transitModes defaults to TRANSIT (all modes)
-    // preTransitModes / postTransitModes default to WALK
-    // directModes defaults to WALK
+    detailedTransfers:  'true',      // get transfer polylines
   });
 
   try{
@@ -1124,22 +1178,45 @@ function buildTransitCard(itin,idx){
     return `<div class="leg-bar-seg" style="flex:${pct};background:${col}" title="${title}">${lbl}</div>`;
   }).join('');
   const tiHTML=buildTransitLegsHTML(itin.legs);
-  // Line badges — use MOTIS direct fields
+
+  // ── Realtime + delay ──
+  const hasRT  = itin.legs?.some(l=>l.realTime);
+  const alerts = extractAlerts(itin);
+  const maxDelay = Math.max(0, ...itin.legs.map(l=>l.arrivalDelay||l.departureDelay||0));
+  const delayBadge = maxDelay>300
+    ? `<span class="delay-badge delay-late" style="margin-left:8px;font-size:12px">+${Math.round(maxDelay/60)}分遅延</span>`
+    : maxDelay>60
+    ? `<span class="delay-badge delay-warn" style="margin-left:8px;font-size:12px">+${Math.round(maxDelay/60)}分遅延</span>`
+    : (hasRT ? `<span class="delay-badge delay-ok" style="margin-left:8px;font-size:12px">定刻</span>` : '');
+  const rtRow = hasRT
+    ? `<div class="rt-realtime-row"><span class="realtime-dot"></span>リアルタイム情報あり</div>`
+    : itin.isFallback
+    ? `<div class="rt-realtime-row" style="color:#E65100"><i class="fa fa-circle-info" style="font-size:10px"></i>&nbsp;推定ルート（リアルタイムデータなし）</div>`
+    : '';
+
+  // ── arrive-by label ──
+  const timeLabel = pickerArriveBy ? '出発時刻' : '到着予定';
+  const timeVal   = pickerArriveBy ? sStr : eStr;
+
+  // ── Line badges ──
   const lineBadges=itin.legs.filter(l=>l.mode!=='WALK').map(l=>{
     const rc=l.routeColor||l.route?.color||'9C27B0';
     const col=rc.startsWith('#')?rc:'#'+rc;
     const name=l.routeShortName||l.displayName||l.route?.shortName||modeName(l.mode);
     return`<span class="rt-tag" style="background:${col}22;color:${col};border:1px solid ${col}44">${name}</span>`;
   }).join('');
+
   return `<div class="rt-card${idx===0?' sel tsel':''}" id="tcard-${idx}" onclick="selectTransitCard(${idx})">
+    ${rtRow}
+    ${alertsHTML(alerts)}
     <div class="rt-top">
-      <span class="rt-time" style="color:var(--pu)">${fDur(itin.duration)}</span>
+      <span class="rt-time" style="color:var(--pu)">${fDur(itin.duration)}${delayBadge}</span>
       <span class="rt-dist" style="font-size:14px;font-weight:500">${sStr} → ${eStr}${dateLabel}</span>
     </div>
     <div class="leg-bar" style="margin:8px 0">${barHTML}</div>
     <div class="rt-eta">
-      <i class="fa fa-clock" style="color:var(--g400)"></i>
-      到着予定: <span class="rt-eta-time">${eStr}${dateLabel}</span>
+      <i class="fa fa-flag-checkered" style="color:var(--g400)"></i>
+      ${timeLabel}: <span class="rt-eta-time">${timeVal}${dateLabel}</span>
       &nbsp;·&nbsp; 乗り換え <b>${transfers}回</b>
     </div>
     <div class="rt-tags">${lineBadges}</div>
@@ -1153,9 +1230,11 @@ function buildTransitLegsHTML(legs){
   legs.forEach((leg,i)=>{
     const isWalk=leg.mode==='WALK';
     const col=legColor(leg);
-    const depT=fTime(leg.startTime);
-    const arrT=fTime(leg.endTime);
+    // Real-time aware time display
+    const depT  = rtTimeHTML(leg.startTime, leg, false);
+    const arrT  = rtTimeHTML(leg.endTime,   leg, true);
     const isLast=i===legs.length-1;
+    const delay = getDelayInfo(leg);
 
     html+=`<div class="ti-node">
       <div class="ti-node-line">
@@ -1163,8 +1242,8 @@ function buildTransitLegsHTML(legs){
         ${!isLast?`<div class="ti-bar" style="background:${isWalk?col+'50':col}"></div>`:''}
       </div>
       <div class="ti-inf">
-        <div class="ti-station">${leg.from?.name||'出発地'}</div>
-        <div class="ti-time">${depT}</div>`;
+        <div class="ti-station">${leg.from?.name||'出発地'}${leg.cancelled?'<span style="color:var(--rd);font-size:11px;margin-left:6px">⚠ 運休</span>':''}</div>
+        <div class="ti-time" style="display:flex;align-items:center;gap:6px">${depT}${delay&&!isWalk?delayBadgeHTML(leg):''}</div>`;
 
     if(isWalk){
       html+=`<div class="ti-leg-detail"><i class="fa fa-person-walking" style="color:${col}"></i>徒歩 ${fDur(leg.duration)} (${fDist(leg.distance||0)})</div>`;
@@ -1173,15 +1252,15 @@ function buildTransitLegsHTML(legs){
       const lineColor = leg.routeColor ? '#'+leg.routeColor : col;
       const lineName  = leg.routeLongName||leg.routeShortName||leg.displayName||modeName(leg.mode);
       const agency    = leg.agencyName?` (${leg.agencyName})`:'';
-      const dir       = leg.headsign ? ` ${leg.headsign}` : '';
+      const dir       = leg.headsign ? ` → ${leg.headsign}` : '';
       const intStops  = leg.intermediateStops||[];
       const stopCnt   = intStops.length+1;
       const sid       = `stops-${i}`;
-      const realTime  = leg.realTime?' 🟢リアルタイム':'';
+      const rtDot     = leg.realTime?'<span class="realtime-dot" style="margin-left:4px"></span>リアルタイム':'';
       html+=`<div class="ti-badge" style="background:${lineColor}">
         <i class="fa ${modeIcon(leg.mode)}"></i> ${lineName}${dir}
       </div>
-      <div class="ti-leg-detail" style="color:var(--g500);font-size:12px">${agency}${realTime}</div>
+      <div class="ti-leg-detail" style="color:var(--g500);font-size:12px">${agency}${rtDot}</div>
       <div class="ti-leg-detail"><i class="fa fa-circle-dot" style="color:${lineColor}"></i>${stopCnt}駅 · ${fDur(leg.duration)} · ${fDist(leg.distance||0)}</div>`;
       if(intStops.length){
         html+=`<div class="ti-stops" onclick="toggleStops('${sid}')">
@@ -1191,8 +1270,13 @@ function buildTransitLegsHTML(legs){
           ${intStops.map(s=>{
             const sArr=fTime(s.arrival||s.scheduledArrival);
             const sDep=fTime(s.departure||s.scheduledDeparture);
+            const delayMin=s.arrivalDelay?Math.round(s.arrivalDelay/60):0;
+            const delayTxt=delayMin>1?`<span class="delay-badge delay-${delayMin>5?'late':'warn'}" style="padding:1px 5px;font-size:10px">+${delayMin}分</span>`:'';
             const cancelled=s.cancelled?'<span style="color:var(--rd);margin-left:4px">運休</span>':'';
-            return `<div class="ti-stop-item">🚉 ${s.name||'途中駅'} <span style="color:var(--g500);margin-left:6px">${sArr}</span>${cancelled}</div>`;
+            return `<div class="ti-stop-item" style="display:flex;justify-content:space-between;align-items:center">
+              <span>🚉 ${s.name||'途中駅'}${cancelled}</span>
+              <span style="color:var(--g500);font-size:11px">${sArr}${delayTxt}</span>
+            </div>`;
           }).join('')}
         </div>`;
       }
@@ -1481,7 +1565,15 @@ function fDist(m){return m>=1000?`${(m/1000).toFixed(1)} km`:`${Math.round(m)} m
 function fDur(s){s=Math.max(0,Math.round(s));const h=Math.floor(s/3600),m=Math.floor((s%3600)/60);return h>0?`${h}時間${m}分`:m>0?`${m}分`:'1分未満'}
 function calcETA(dur){const t=new Date(Date.now()+dur*1000);return`${t.getHours()}:${pad(t.getMinutes())}`}
 // JST time/date formatters (API returns UTC ISO strings)
-function fTime(iso){if(!iso)return'--:--';try{return new Date(iso).toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit',timeZone:'Asia/Tokyo',hour12:false})}catch{return'--:--'}}
+function fTime(iso){
+  if(!iso)return'--:--';
+  try{
+    // Accept both ISO strings and Unix ms timestamps
+    const d=typeof iso==='number'?new Date(iso):new Date(iso);
+    if(isNaN(d))return'--:--';
+    return d.toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit',hour12:false});
+  }catch{return'--:--'}
+}
 function fDateTime(iso){if(!iso)return'';try{const d=new Date(iso);return d.toLocaleString('ja-JP',{month:'long',day:'numeric',hour:'2-digit',minute:'2-digit',timeZone:'Asia/Tokyo',hour12:false})}catch{return''}}
 function fDateStr(iso){if(!iso)return'';try{return new Date(iso).toLocaleDateString('ja-JP',{month:'numeric',day:'numeric',timeZone:'Asia/Tokyo'})}catch{return''}}
 function pad(n){return String(n).padStart(2,'0')}
@@ -1537,8 +1629,167 @@ function catLabel(t){return{restaurant:'レストラン',cafe:'カフェ',conven
 let tt;function toast(m){const e=document.getElementById('toast');e.textContent=m;e.style.display='block';clearTimeout(tt);tt=setTimeout(()=>e.style.display='none',3500)}
 function spin(v){document.getElementById('spin').style.display=v?'block':'none'}
 
+
+// ═══════════════════════════════════════════
+//  DATE/TIME PICKER  (Google Maps style)
+// ═══════════════════════════════════════════
+let pickerArriveBy = false;
+let pickerDate = null; // Date object
+
+function initDatePicker(){
+  // Populate date options: today + next 6 days
+  const dateEl = document.getElementById('dt-date');
+  const hourEl = document.getElementById('dt-hour');
+  const minEl  = document.getElementById('dt-min');
+  if(!dateEl) return;
+
+  const now = new Date();
+  const days = ['日','月','火','水','木','金','土'];
+  for(let i=0;i<7;i++){
+    const d = new Date(now); d.setDate(d.getDate()+i);
+    const opt = document.createElement('option');
+    opt.value = d.toISOString().slice(0,10);
+    opt.textContent = i===0 ? `今日 (${d.getMonth()+1}/${d.getDate()})` :
+                      i===1 ? `明日 (${d.getMonth()+1}/${d.getDate()})` :
+                      `${d.getMonth()+1}/${d.getDate()} (${days[d.getDay()]})`;
+    dateEl.appendChild(opt);
+  }
+
+  for(let h=0;h<24;h++){
+    const opt = document.createElement('option');
+    opt.value = h; opt.textContent = pad(h)+'時';
+    hourEl.appendChild(opt);
+  }
+  for(let m=0;m<60;m+=5){
+    const opt = document.createElement('option');
+    opt.value = m; opt.textContent = pad(m)+'分';
+    minEl.appendChild(opt);
+  }
+
+  // Set to current time (rounded to nearest 5min)
+  const cur = new Date();
+  cur.setMinutes(Math.ceil(cur.getMinutes()/5)*5, 0, 0);
+  dateEl.value = cur.toISOString().slice(0,10);
+  hourEl.value = cur.getHours();
+  minEl.value  = Math.floor(cur.getMinutes()/5)*5;
+  pickerDate   = cur;
+}
+
+function onDtChange(){
+  const dateEl = document.getElementById('dt-date');
+  const hourEl = document.getElementById('dt-hour');
+  const minEl  = document.getElementById('dt-min');
+  if(!dateEl) return;
+  const [y,mo,d] = dateEl.value.split('-').map(Number);
+  pickerDate = new Date(y, mo-1, d, +hourEl.value, +minEl.value, 0);
+}
+
+function setArriveBy(val){
+  pickerArriveBy = val;
+  document.getElementById('ab-depart')?.classList.toggle('on', !val);
+  document.getElementById('ab-arrive')?.classList.toggle('on',  val);
+}
+
+function resetDtNow(){
+  const cur = new Date();
+  cur.setMinutes(Math.ceil(cur.getMinutes()/5)*5, 0, 0);
+  const dateEl = document.getElementById('dt-date');
+  const hourEl = document.getElementById('dt-hour');
+  const minEl  = document.getElementById('dt-min');
+  if(!dateEl) return;
+  dateEl.value = cur.toISOString().slice(0,10);
+  hourEl.value = cur.getHours();
+  minEl.value  = Math.floor(cur.getMinutes()/5)*5;
+  pickerDate   = cur;
+}
+
+// Get ISO string from picker (or now if not initialized)
+function getPickerISO(){
+  if(!pickerDate) return new Date().toISOString();
+  return pickerDate.toISOString();
+}
+
+// ═══════════════════════════════════════════
+//  DELAY / REALTIME HELPERS
+// ═══════════════════════════════════════════
+
+// Parse delay seconds from a Transitous leg
+// Transitous v5: leg.realTime (bool), leg.departureDelay / leg.arrivalDelay (seconds, can be negative)
+function getDelayInfo(leg){
+  if(!leg) return null;
+  try{
+    const depDelay = leg.departureDelay ?? null;
+    const arrDelay = leg.arrivalDelay   ?? null;
+    const isRT     = leg.realTime === true;
+    if(!isRT && depDelay === null && arrDelay === null) return null;
+    const sec = arrDelay ?? depDelay ?? 0;
+    return { sec, isRT,
+      label: sec===0?'定刻':sec>0?'+'+Math.round(sec/60)+'分遅延':Math.round(sec/60)+'分早着',
+      cls:   sec>5*60?'delay-late':sec>1*60?'delay-warn':'delay-ok'
+    };
+  }catch{ return null; }
+}
+
+// Build a delay badge HTML string
+function delayBadgeHTML(leg){
+  const d = getDelayInfo(leg);
+  if(!d) return '';
+  const dot = d.isRT ? '<span class="realtime-dot"></span>' : '';
+  return `<span class="delay-badge ${d.cls}">${dot}${d.label}</span>`;
+}
+
+// Build a scheduled→realtime time display
+function rtTimeHTML(scheduledISO, leg, isArr){
+  const timeStr = fTime(scheduledISO);
+  if(!leg) return timeStr;
+  try{
+    const d = getDelayInfo(leg);
+    if(!d || d.sec === 0) return timeStr;
+    const sched = typeof scheduledISO==='number' ? new Date(scheduledISO) : new Date(scheduledISO);
+    if(isNaN(sched)) return timeStr;
+    const rtMs  = sched.getTime() + d.sec*1000;
+    const rtStr = fTime(rtMs);
+    const color = d.cls==='delay-late'?'var(--rd)':d.cls==='delay-warn'?'#E65100':'var(--gn)';
+    return '<span class="delay-line">'+timeStr+'</span>'
+      +'<span style="color:'+color+';font-weight:700">'+rtStr+'</span>';
+  }catch(e){ return timeStr; }
+}
+
+// Extract service alerts from itinerary
+function extractAlerts(itin){
+  const alerts = [];
+  (itin.legs||[]).forEach(leg=>{
+    (leg.alerts||leg.serviceAlerts||[]).forEach(a=>{
+      const txt = a.alertDescriptionText?.someTranslation?.text ||
+                  a.alertDescriptionText?.translations?.[0]?.text ||
+                  a.description || a.header || '';
+      const sev = a.severity || a.alertSeverityLevel || 'INFO';
+      if(txt) alerts.push({ txt, sev,
+        route: leg.route?.shortName||'', mode: leg.mode });
+    });
+    // realtime cancellation
+    if(leg.cancelled) alerts.push({
+      txt: `${leg.route?.shortName||'この列車'}は運休です`, sev:'SEVERE', mode:leg.mode });
+  });
+  return alerts;
+}
+
+function alertsHTML(alerts){
+  if(!alerts.length) return '';
+  return alerts.map(a=>{
+    const severe = a.sev==='SEVERE'||a.sev==='WARNING';
+    const ico    = severe ? 'fa-triangle-exclamation' : 'fa-circle-info';
+    const prefix = a.route ? '['+a.route+'] ' : '';
+    return '<div class="disrupt-banner '+(severe?'severe':'')+'">'
+      +'<i class="fa '+ico+'"></i>'
+      +'<span>'+prefix+a.txt+'</span>'
+      +'</div>';
+  }).join('');
+}
+
 // ── BOOT ──
 initMap();
+initDatePicker();
 if(window.innerWidth>=768)document.getElementById('sb').classList.add('open');
 document.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key==='k'){e.preventDefault();$si().focus();$si().select()}});
 </script>
